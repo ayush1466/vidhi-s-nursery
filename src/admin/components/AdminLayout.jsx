@@ -17,14 +17,28 @@ const NAV = [
 
 export default function AdminLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
   const { admin, setAdmin } = useAdminAuth()
   const navigate = useNavigate()
 
   const handleSignOut = async () => {
-    await adminSignOut()
-    setAdmin(null)
-    toast.success('Signed out')
-    navigate('/admin')
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      const { error } = await adminSignOut()
+      if (error) {
+        toast.error('Sign out failed, local session cleared')
+      } else {
+        toast.success('Signed out')
+      }
+    } catch (err) {
+      console.error('admin signout error:', err)
+      toast.error('Sign out failed, local session cleared')
+    } finally {
+      setAdmin(null)
+      navigate('/admin')
+      setSigningOut(false)
+    }
   }
 
   const SidebarContent = () => (
@@ -77,10 +91,11 @@ export default function AdminLayout({ children }) {
         </div>
         <button
           onClick={handleSignOut}
+          disabled={signingOut}
           className="flex items-center gap-3 px-4 py-3 rounded-xl font-body text-sm text-red-400 hover:bg-red-900/20 hover:text-red-300 transition-all w-full"
         >
           <LogOut className="w-4 h-4" />
-          Sign Out
+          {signingOut ? 'Signing Out...' : 'Sign Out'}
         </button>
       </div>
     </div>

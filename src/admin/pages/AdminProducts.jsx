@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getAllProducts, createProduct, updateProduct, deleteProduct, toggleProductStock } from '../adminSupabase'
+import { getAdminCache, setAdminCache } from '../adminPageCache'
 import { Plus, Search, Edit2, Trash2, X, Leaf, ToggleLeft, ToggleRight } from 'lucide-react'
 import { CATEGORIES } from '../../lib/mockData'
 import toast from 'react-hot-toast'
@@ -140,17 +141,52 @@ function ProductModal({ product, onClose, onSave }) {
 }
 
 export default function AdminProducts() {
-  const [products, setProducts] = useState([])
-  const [loading, setLoading] = useState(true)
+  const cachedProducts = getAdminCache('products_list')
+  const [products, setProducts] = useState(cachedProducts || [])
+  const [loading, setLoading] = useState(!cachedProducts)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('All')
   const [modal, setModal] = useState(null) // null | 'add' | product object
+  const isMountedRef = useRef(true)
 
   useEffect(() => {
-    getAllProducts().then(({ data }) => {
-      setProducts(data || [])
-      setLoading(false)
-    })
+    isMountedRef.current = true
+
+    const load = async ({ silent = false } = {}) => {
+      if (!silent && isMountedRef.current) setLoading(true)
+      try {
+        const { data, error } = await getAllProducts()
+        if (!isMountedRef.current) return
+        if (error) {
+          toast.error('Failed to load products')
+          return
+        }
+        setProducts(data || [])
+        setAdminCache('products_list', data || [])
+      } catch (err) {
+        console.error('products fetch error:', err)
+        if (!silent) toast.error('Failed to load products')
+      } finally {
+        if (isMountedRef.current) setLoading(false)
+      }
+    }
+
+    load()
+
+    const refreshOnReturn = () => load({ silent: true })
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refreshOnReturn()
+    }
+    window.addEventListener('focus', refreshOnReturn)
+    document.addEventListener('visibilitychange', handleVisibility)
+    const poll = setInterval(() => load({ silent: true }), 12000)
+
+    return () => {
+      isMountedRef.current = false
+      clearInterval(poll)
+      window.removeEventListener('focus', refreshOnReturn)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [])
 
   const filtered = products.filter(p => {

@@ -1,17 +1,48 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getAllCustomers } from '../adminSupabase'
+import { getAdminCache, setAdminCache } from '../adminPageCache'
 import { Search, Users, ShoppingBag, Mail } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 export default function AdminCustomers() {
-  const [customers, setCustomers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const cachedCustomers = getAdminCache('customers_list')
+  const [customers, setCustomers] = useState(cachedCustomers || [])
+  const [loading, setLoading] = useState(!cachedCustomers)
   const [search, setSearch] = useState('')
+  const isMountedRef = useRef(true)
 
   useEffect(() => {
-    getAllCustomers().then(({ data }) => {
+    isMountedRef.current = true
+
+    const load = async ({ silent = false } = {}) => {
+      if (!silent && isMountedRef.current) setLoading(true)
+      const { data, error } = await getAllCustomers()
+      if (!isMountedRef.current) return
+      if (error) {
+        console.error('customers fetch error:', error)
+        if (!silent) toast.error('Failed to load customers')
+      }
       setCustomers(data || [])
-      setLoading(false)
-    })
+      setAdminCache('customers_list', data || [])
+      if (isMountedRef.current) setLoading(false)
+    }
+
+    load()
+
+    const refreshOnReturn = () => load({ silent: true })
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refreshOnReturn()
+    }
+    window.addEventListener('focus', refreshOnReturn)
+    document.addEventListener('visibilitychange', handleVisibility)
+    const poll = setInterval(() => load({ silent: true }), 12000)
+
+    return () => {
+      isMountedRef.current = false
+      clearInterval(poll)
+      window.removeEventListener('focus', refreshOnReturn)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [])
 
   const filtered = customers.filter(c =>

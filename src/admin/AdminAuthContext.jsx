@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { adminClient as supabase } from './adminClient'
 import { checkIsAdmin } from './adminSupabase'
 
 const AdminAuthContext = createContext()

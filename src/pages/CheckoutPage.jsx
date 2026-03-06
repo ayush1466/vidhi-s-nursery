@@ -7,15 +7,20 @@ import { CheckCircle, CreditCard, Truck, Lock, MapPin } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const STEPS = ['Shipping', 'Payment', 'Confirm']
+const isUUID = (val) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(val))
+const ORDER_TIMEOUT_MS = 45000
 
 export default function CheckoutPage() {
   const { items, total, clearCart } = useCart()
   const { user } = useAuth()
   const navigate = useNavigate()
+
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(false)
   const [orderPlaced, setOrderPlaced] = useState(false)
   const [orderId, setOrderId] = useState(null)
+  const [coupon, setCoupon] = useState('')
+  const [discount, setDiscount] = useState(0)
 
   const [shipping, setShipping] = useState({
     name: user?.user_metadata?.full_name || '',
@@ -35,68 +40,106 @@ export default function CheckoutPage() {
     upiId: '',
   })
 
-  const [coupon, setCoupon] = useState('')
-  const [discount, setDiscount] = useState(0)
+  const shippingFee = total >= 599 ? 0 : 49
+  const finalTotal = total - discount + shippingFee
+
+  const withTimeout = (promise, ms, message) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+    ])
+
+  const isTimeoutError = (err) => String(err?.message || '').toLowerCase().includes('timed out')
 
   const applyCoupon = () => {
     if (coupon.toUpperCase() === 'GREENIE') {
       setDiscount(Math.round(total * 0.15))
-      toast.success('15% discount applied! 🎉')
+      toast.success('15% discount applied')
     } else {
       toast.error('Invalid coupon code')
     }
   }
 
-  const shippingFee = total >= 599 ? 0 : 49
-  const finalTotal = total - discount + shippingFee
-
   const handlePlaceOrder = async () => {
     setLoading(true)
     try {
-      // Save order to Supabase with full shipping address
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          user_id: user.id,
-          total_amount: finalTotal,
-          status: 'pending',
-          shipping_address: {
-            name: shipping.name,
-            email: shipping.email,
-            phone: shipping.phone,
-            address: shipping.address,
-            city: shipping.city,
-            state: shipping.state,
-            pincode: shipping.pincode,
-            full: `${shipping.address}, ${shipping.city}, ${shipping.state} - ${shipping.pincode}`,
-          },
-          payment_method: payment.method,
-        })
-        .select()
-        .single()
+      if (!user) {
+        toast.error('Please sign in to place order')
+        navigate('/login')
+        return
+      }
+
+      const createOrderRequest = () =>
+        supabase
+          .from('orders')
+          .insert({
+            user_id: user.id,
+            total_amount: finalTotal,
+            status: 'pending',
+            payment_method: payment.method,
+            shipping_address: {
+              name: shipping.name,
+              email: shipping.email,
+              phone: shipping.phone,
+              address: shipping.address,
+              city: shipping.city,
+              state: shipping.state,
+              pincode: shipping.pincode,
+              full: `${shipping.address}, ${shipping.city}, ${shipping.state} - ${shipping.pincode}`,
+            },
+          })
+          .select()
+          .single()
+
+      let orderResponse
+      try {
+        orderResponse = await withTimeout(createOrderRequest(), ORDER_TIMEOUT_MS, 'Order request timed out')
+      } catch (firstErr) {
+        if (!isTimeoutError(firstErr)) throw firstErr
+        toast('Network is slow, retrying order...')
+        orderResponse = await withTimeout(createOrderRequest(), ORDER_TIMEOUT_MS, 'Order request timed out')
+      }
+
+      const { data: order, error: orderError } = orderResponse
 
       if (orderError) throw orderError
 
-      // Save order items
       const orderItems = items.map(item => ({
         order_id: order.id,
-        product_id: item.id,
+        product_id: isUUID(item.id) ? item.id : null,
+        product_name: item.name,
+        product_image: item.image,
         quantity: item.quantity,
         price: item.price,
       }))
 
-      const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
+      const insertItemsRequest = () => supabase.from('order_items').insert(orderItems)
+
+      let itemsResponse
+      try {
+        itemsResponse = await withTimeout(insertItemsRequest(), ORDER_TIMEOUT_MS, 'Order items request timed out')
+      } catch (firstErr) {
+        if (!isTimeoutError(firstErr)) throw firstErr
+        toast('Network is slow, retrying items...')
+        itemsResponse = await withTimeout(insertItemsRequest(), ORDER_TIMEOUT_MS, 'Order items request timed out')
+      }
+
+      const { error: itemsError } = itemsResponse
       if (itemsError) throw itemsError
 
       setOrderId(order.id)
       clearCart()
       setOrderPlaced(true)
-
     } catch (e) {
-      toast.error('Something went wrong. Please try again.')
-      console.error(e)
+      console.error('Order error:', e)
+      toast.error(
+        isTimeoutError(e)
+          ? 'Order is taking too long. Check internet and try again.'
+          : 'Something went wrong: ' + e.message
+      )
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   if (items.length === 0 && !orderPlaced) {
@@ -119,20 +162,19 @@ export default function CheckoutPage() {
           <div className="w-20 h-20 bg-forest-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="w-10 h-10 text-forest-600" />
           </div>
-          <h1 className="font-display text-3xl text-bark mb-3">Order Placed! 🌿</h1>
+          <h1 className="font-display text-3xl text-bark mb-3">Order Placed</h1>
           <p className="font-body text-bark/60 mb-2">Thank you for shopping with Vidhi's Nursery</p>
           {orderId && (
-            <p className="font-body text-sm text-forest-600 mb-2">
+            <p className="font-body text-sm text-forest-600 mb-4">
               Order ID: <strong>#{orderId.slice(0, 8).toUpperCase()}</strong>
             </p>
           )}
           <div className="bg-forest-50 rounded-2xl p-4 mb-6 text-left">
             <p className="font-body text-xs text-forest-600 uppercase tracking-wider mb-2">Delivering to</p>
-            <p className="font-body text-sm text-bark">{shipping.name}</p>
+            <p className="font-body text-sm text-bark font-medium">{shipping.name}</p>
             <p className="font-body text-sm text-bark/60">{shipping.address}, {shipping.city}, {shipping.state} - {shipping.pincode}</p>
             <p className="font-body text-sm text-bark/60">{shipping.phone}</p>
           </div>
-          <p className="font-body text-sm text-bark/50 mb-8">Your plants will be carefully packed and delivered within 3-5 business days.</p>
           <div className="flex gap-4 justify-center">
             <Link to="/orders" className="border border-forest-200 text-bark font-body px-6 py-3 rounded-full hover:bg-forest-50 transition-colors">
               View Orders
@@ -151,25 +193,21 @@ export default function CheckoutPage() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <h1 className="font-display text-3xl text-bark mb-8">Checkout</h1>
 
-        {/* Progress */}
         <div className="flex items-center gap-2 mb-10">
           {STEPS.map((s, i) => (
             <div key={s} className="flex items-center gap-2">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-body font-medium transition-colors ${i <= step ? 'bg-forest-600 text-white' : 'bg-forest-100 text-gray-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-body font-medium ${i <= step ? 'bg-forest-600 text-white' : 'bg-forest-100 text-gray-400'}`}>
                 {i < step ? '✓' : i + 1}
               </div>
               <span className={`font-body text-sm ${i === step ? 'text-bark' : 'text-gray-400'}`}>{s}</span>
-              {i < STEPS.length - 1 && <div className={`h-px w-10 ${i < step ? 'bg-forest-400' : 'bg-forest-100'}`} />}
             </div>
           ))}
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
-
-            {/* Step 0: Shipping */}
             {step === 0 && (
-              <div className="bg-white rounded-3xl p-6 shadow-sm animate-slide-up">
+              <div className="bg-white rounded-3xl p-6 shadow-sm">
                 <div className="flex items-center gap-2 mb-5">
                   <Truck className="w-5 h-5 text-forest-600" />
                   <h2 className="font-display text-xl text-bark">Shipping Details</h2>
@@ -198,16 +236,15 @@ export default function CheckoutPage() {
                 <button
                   onClick={() => setStep(1)}
                   disabled={!shipping.name || !shipping.phone || !shipping.address || !shipping.city || !shipping.pincode}
-                  className="mt-6 w-full bg-forest-600 text-white font-body py-3.5 rounded-full hover:bg-forest-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="mt-6 w-full bg-forest-600 text-white font-body py-3.5 rounded-full hover:bg-forest-700 disabled:opacity-50"
                 >
-                  Continue to Payment →
+                  Continue to Payment
                 </button>
               </div>
             )}
 
-            {/* Step 1: Payment */}
             {step === 1 && (
-              <div className="bg-white rounded-3xl p-6 shadow-sm animate-slide-up">
+              <div className="bg-white rounded-3xl p-6 shadow-sm">
                 <div className="flex items-center gap-2 mb-5">
                   <CreditCard className="w-5 h-5 text-forest-600" />
                   <h2 className="font-display text-xl text-bark">Payment</h2>
@@ -217,75 +254,26 @@ export default function CheckoutPage() {
                     <button
                       key={m}
                       onClick={() => setPayment({ ...payment, method: m })}
-                      className={`flex-1 py-2.5 rounded-xl font-body text-sm transition-colors border ${payment.method === m ? 'bg-forest-600 text-white border-forest-600' : 'border-forest-100 text-bark hover:bg-forest-50'}`}
+                      className={`flex-1 py-2.5 rounded-xl font-body text-sm border ${payment.method === m ? 'bg-forest-600 text-white border-forest-600' : 'border-forest-100 text-bark hover:bg-forest-50'}`}
                     >
-                      {m === 'card' ? '💳 Card' : m === 'upi' ? '📱 UPI' : '🏠 Cash on Delivery'}
+                      {m === 'card' ? 'Card' : m === 'upi' ? 'UPI' : 'Cash on Delivery'}
                     </button>
                   ))}
                 </div>
-
-                {payment.method === 'card' && (
-                  <div className="space-y-4">
-                    <div>
-                      <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1">Card Number</label>
-                      <input type="text" placeholder="1234 5678 9012 3456" maxLength={19}
-                        value={payment.cardNumber}
-                        onChange={e => setPayment({ ...payment, cardNumber: e.target.value.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim() })}
-                        className="w-full border border-forest-100 rounded-xl px-4 py-2.5 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1">Expiry</label>
-                        <input type="text" placeholder="MM/YY" maxLength={5}
-                          value={payment.expiry} onChange={e => setPayment({ ...payment, expiry: e.target.value })}
-                          className="w-full border border-forest-100 rounded-xl px-4 py-2.5 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
-                        />
-                      </div>
-                      <div>
-                        <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1">CVV</label>
-                        <input type="password" placeholder="***" maxLength={4}
-                          value={payment.cvv} onChange={e => setPayment({ ...payment, cvv: e.target.value })}
-                          className="w-full border border-forest-100 rounded-xl px-4 py-2.5 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {payment.method === 'upi' && (
-                  <div>
-                    <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1">UPI ID</label>
-                    <input type="text" placeholder="yourname@upi"
-                      value={payment.upiId} onChange={e => setPayment({ ...payment, upiId: e.target.value })}
-                      className="w-full border border-forest-100 rounded-xl px-4 py-2.5 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
-                    />
-                  </div>
-                )}
-
-                {payment.method === 'cod' && (
-                  <div className="bg-earth-50 rounded-2xl p-4 text-center">
-                    <p className="font-body text-sm text-bark">Pay with cash when your plants arrive. ₹49 COD fee applies.</p>
-                  </div>
-                )}
-
                 <div className="flex gap-3 mt-6">
-                  <button onClick={() => setStep(0)} className="px-6 py-3.5 border border-forest-200 text-bark font-body rounded-full hover:bg-forest-50 transition-colors">
-                    ← Back
+                  <button onClick={() => setStep(0)} className="px-6 py-3.5 border border-forest-200 text-bark font-body rounded-full hover:bg-forest-50">
+                    Back
                   </button>
-                  <button onClick={() => setStep(2)} className="flex-1 bg-forest-600 text-white font-body py-3.5 rounded-full hover:bg-forest-700 transition-colors">
-                    Review Order →
+                  <button onClick={() => setStep(2)} className="flex-1 bg-forest-600 text-white font-body py-3.5 rounded-full hover:bg-forest-700">
+                    Review Order
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Step 2: Confirm */}
             {step === 2 && (
-              <div className="bg-white rounded-3xl p-6 shadow-sm animate-slide-up">
+              <div className="bg-white rounded-3xl p-6 shadow-sm">
                 <h2 className="font-display text-xl text-bark mb-5">Review & Place Order</h2>
-
-                {/* Shipping summary */}
                 <div className="bg-forest-50 rounded-2xl p-4 mb-4">
                   <div className="flex items-center gap-2 mb-2">
                     <MapPin className="w-4 h-4 text-forest-600" />
@@ -296,22 +284,14 @@ export default function CheckoutPage() {
                   <p className="font-body text-sm text-bark/60">{shipping.city}, {shipping.state} - {shipping.pincode}</p>
                   <p className="font-body text-sm text-bark/60">{shipping.phone}</p>
                 </div>
-
-                <div className="bg-forest-50 rounded-2xl p-4 mb-6">
-                  <p className="font-body text-xs text-forest-600 uppercase tracking-wider mb-2">Payment</p>
-                  <p className="font-body text-sm text-bark capitalize">
-                    {payment.method === 'card' ? `Card ending in ${payment.cardNumber.slice(-4) || '****'}` : payment.method === 'upi' ? `UPI: ${payment.upiId}` : 'Cash on Delivery'}
-                  </p>
-                </div>
-
                 <div className="flex gap-3">
-                  <button onClick={() => setStep(1)} className="px-6 py-3.5 border border-forest-200 text-bark font-body rounded-full hover:bg-forest-50 transition-colors">
-                    ← Back
+                  <button onClick={() => setStep(1)} className="px-6 py-3.5 border border-forest-200 text-bark font-body rounded-full hover:bg-forest-50">
+                    Back
                   </button>
                   <button
                     onClick={handlePlaceOrder}
                     disabled={loading}
-                    className="flex-1 flex items-center justify-center gap-2 bg-forest-600 text-white font-body py-3.5 rounded-full hover:bg-forest-700 transition-colors disabled:opacity-70"
+                    className="flex-1 flex items-center justify-center gap-2 bg-forest-600 text-white font-body py-3.5 rounded-full hover:bg-forest-700 disabled:opacity-70"
                   >
                     <Lock className="w-4 h-4" />
                     {loading ? 'Placing Order...' : `Place Order · ₹${finalTotal.toFixed(2)}`}
@@ -321,7 +301,6 @@ export default function CheckoutPage() {
             )}
           </div>
 
-          {/* Order Summary */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-3xl p-5 shadow-sm sticky top-24">
               <h3 className="font-display text-bark text-lg mb-4">Order Summary</h3>
@@ -337,7 +316,6 @@ export default function CheckoutPage() {
                   </div>
                 ))}
               </div>
-
               <div className="flex gap-2 mb-4">
                 <input
                   type="text"
@@ -346,11 +324,10 @@ export default function CheckoutPage() {
                   onChange={e => setCoupon(e.target.value)}
                   className="flex-1 border border-forest-100 rounded-full px-3 py-2 font-body text-xs focus:outline-none focus:ring-1 focus:ring-forest-300"
                 />
-                <button onClick={applyCoupon} className="bg-forest-100 text-forest-700 font-body text-xs px-3 py-2 rounded-full hover:bg-forest-200 transition-colors">
+                <button onClick={applyCoupon} className="bg-forest-100 text-forest-700 font-body text-xs px-3 py-2 rounded-full hover:bg-forest-200">
                   Apply
                 </button>
               </div>
-
               <div className="space-y-2 text-sm font-body border-t border-forest-50 pt-4">
                 <div className="flex justify-between text-bark/60">
                   <span>Subtotal</span><span>₹{total.toFixed(2)}</span>
@@ -368,11 +345,6 @@ export default function CheckoutPage() {
                   <span className="font-display">Total</span>
                   <span className="font-display text-forest-800">₹{finalTotal.toFixed(2)}</span>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-center gap-1 mt-4 text-gray-400">
-                <Lock className="w-3 h-3" />
-                <p className="font-body text-xs">Secured with SSL encryption</p>
               </div>
             </div>
           </div>

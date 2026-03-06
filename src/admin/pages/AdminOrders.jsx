@@ -1,252 +1,340 @@
-import { useEffect, useState } from 'react'
-import { getAllOrders, updateOrderStatus } from '../adminSupabase'
-import { Search, Filter, Eye, ChevronDown, X, Package } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { adminClient as supabase } from '../adminClient'
+import { getAdminCache, setAdminCache } from '../adminPageCache'
+import { MapPin, Phone, Mail, Package, CheckCircle, Clock, Truck, XCircle, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { updateOrderStatus } from '../adminSupabase'
 
-const STATUS_OPTIONS = ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
-
-const STATUS_COLOR = {
-  pending: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
-  processing: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
-  shipped: 'bg-purple-500/20 text-purple-400 border border-purple-500/30',
-  delivered: 'bg-forest-500/20 text-forest-400 border border-forest-500/30',
-  cancelled: 'bg-red-500/20 text-red-400 border border-red-500/30',
+const STATUS = {
+  pending: { label: 'Pending', icon: Clock, color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+  processing: { label: 'Processing', icon: RefreshCw, color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  shipped: { label: 'Shipped', icon: Truck, color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+  delivered: { label: 'Delivered', icon: CheckCircle, color: 'bg-forest-500/20 text-forest-400 border-forest-500/30' },
+  cancelled: { label: 'Cancelled', icon: XCircle, color: 'bg-red-500/20 text-red-400 border-red-500/30' },
 }
-
-function OrderDetailModal({ order, onClose, onStatusUpdate }) {
-  const [status, setStatus] = useState(order.status)
-  const [saving, setSaving] = useState(false)
-
-  const handleSave = async () => {
-    setSaving(true)
-    const { error } = await updateOrderStatus(order.id, status)
-    if (error) toast.error('Failed to update status')
-    else {
-      toast.success('Order status updated!')
-      onStatusUpdate(order.id, status)
-      onClose()
-    }
-    setSaving(false)
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative bg-forest-900 border border-forest-700 rounded-3xl w-full max-w-lg shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-forest-800">
-          <h2 className="font-display text-white text-lg">
-            Order #{order.id?.slice(0, 8).toUpperCase()}
-          </h2>
-          <button onClick={onClose} className="text-forest-500 hover:text-white transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-5">
-          {/* Customer */}
-          <div className="bg-forest-800/50 rounded-2xl p-4">
-            <p className="font-body text-xs text-forest-500 uppercase tracking-wider mb-2">Customer</p>
-            <p className="font-body text-sm text-white">{order.profiles?.full_name || 'Guest'}</p>
-            <p className="font-body text-xs text-forest-400">{order.profiles?.email || '—'}</p>
-          </div>
-
-          {/* Shipping Address */}
-          {order.shipping_address && (
-            <div className="bg-forest-800/50 rounded-2xl p-4">
-              <p className="font-body text-xs text-forest-500 uppercase tracking-wider mb-2">Shipping Address</p>
-              <p className="font-body text-sm text-forest-300">
-                {order.shipping_address.address}, {order.shipping_address.city}, {order.shipping_address.state} - {order.shipping_address.pincode}
-              </p>
-              <p className="font-body text-xs text-forest-500 mt-1">{order.shipping_address.phone}</p>
-            </div>
-          )}
-
-          {/* Items */}
-          <div>
-            <p className="font-body text-xs text-forest-500 uppercase tracking-wider mb-3">Items</p>
-            <div className="space-y-2">
-              {(order.order_items || []).map((item, i) => (
-                <div key={i} className="flex items-center gap-3 bg-forest-800/50 rounded-xl p-3">
-                  {item.products?.image && (
-                    <img src={item.products.image} alt="" className="w-10 h-10 rounded-lg object-cover" />
-                  )}
-                  <div className="flex-1">
-                    <p className="font-body text-sm text-white">{item.products?.name || 'Product'}</p>
-                    <p className="font-body text-xs text-forest-500">Qty: {item.quantity}</p>
-                  </div>
-                  <p className="font-display text-sm text-forest-400">₹{item.price * item.quantity}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Total */}
-          <div className="flex justify-between items-center pt-2 border-t border-forest-800">
-            <span className="font-body text-sm text-forest-400">Total Amount</span>
-            <span className="font-display text-lg text-white">₹{Number(order.total_amount).toLocaleString('en-IN')}</span>
-          </div>
-
-          {/* Status Update */}
-          <div>
-            <p className="font-body text-xs text-forest-500 uppercase tracking-wider mb-2">Update Status</p>
-            <div className="flex flex-wrap gap-2">
-              {STATUS_OPTIONS.map(s => (
-                <button
-                  key={s}
-                  onClick={() => setStatus(s)}
-                  className={`font-body text-xs px-3 py-2 rounded-full capitalize transition-all border ${
-                    status === s ? STATUS_COLOR[s] : 'border-forest-700 text-forest-500 hover:border-forest-500'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            onClick={handleSave}
-            disabled={saving || status === order.status}
-            className="w-full bg-forest-600 text-white font-body py-3 rounded-xl hover:bg-forest-500 transition-colors disabled:opacity-50"
-          >
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+const ADMIN_ORDERS_TIMEOUT_MS = 45000
 
 export default function AdminOrders() {
-  const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [selectedOrder, setSelectedOrder] = useState(null)
+  const cachedOrders = getAdminCache('orders_list')
+  const [orders, setOrders] = useState(cachedOrders || [])
+  const [loading, setLoading] = useState(!cachedOrders)
+  const [filter, setFilter] = useState('all')
+  const [updating, setUpdating] = useState(null)
+  const isMountedRef = useRef(true)
+  const activeFetchIdRef = useRef(0)
 
-  useEffect(() => {
-    getAllOrders().then(({ data }) => {
+  const fetchOrders = async ({ withLoader = false, silent = false } = {}) => {
+    const fetchId = ++activeFetchIdRef.current
+    if (withLoader && isMountedRef.current) setLoading(true)
+
+    try {
+      const withTimeout = (promise, ms, message) =>
+        Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+        ])
+
+      const query = () =>
+        supabase
+          .from('orders')
+          .select(`
+            id, status, total_amount, created_at, shipping_address, payment_method, user_id,
+            order_items ( id, quantity, price, product_name, product_image )
+          `)
+          .order('created_at', { ascending: false })
+
+      const isTimeoutError = (err) => String(err?.message || '').toLowerCase().includes('timed out')
+
+      let response
+      try {
+        response = await withTimeout(query(), ADMIN_ORDERS_TIMEOUT_MS, 'Admin orders request timed out')
+      } catch (firstErr) {
+        if (!isTimeoutError(firstErr)) throw firstErr
+        response = await withTimeout(query(), ADMIN_ORDERS_TIMEOUT_MS, 'Admin orders request timed out')
+      }
+
+      const { data, error } = response
+      if (error) throw error
+
+      if (!isMountedRef.current || fetchId !== activeFetchIdRef.current) return
       setOrders(data || [])
-      setLoading(false)
-    })
-  }, [])
-
-  const filtered = orders.filter(o => {
-    const matchStatus = statusFilter === 'all' || o.status === statusFilter
-    const matchSearch = !search ||
-      o.id?.toLowerCase().includes(search.toLowerCase()) ||
-      o.profiles?.email?.toLowerCase().includes(search.toLowerCase()) ||
-      o.profiles?.full_name?.toLowerCase().includes(search.toLowerCase())
-    return matchStatus && matchSearch
-  })
-
-  const handleStatusUpdate = (id, newStatus) => {
-    setOrders(orders.map(o => o.id === id ? { ...o, status: newStatus } : o))
+      setAdminCache('orders_list', data || [])
+    } catch (err) {
+      console.error('fetch orders error:', err)
+      if (!silent) toast.error('Failed to load orders')
+    } finally {
+      if (isMountedRef.current) setLoading(false)
+    }
   }
 
+  useEffect(() => {
+    isMountedRef.current = true
+    fetchOrders({ withLoader: true })
+
+    const refreshOnReturn = () => fetchOrders({ silent: true })
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refreshOnReturn()
+    }
+
+    window.addEventListener('focus', refreshOnReturn)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    let debounce = null
+    const channel = supabase
+      .channel('admin_orders_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        if (debounce) clearTimeout(debounce)
+        debounce = setTimeout(() => fetchOrders({ silent: true }), 800)
+      })
+      .subscribe()
+    const poll = setInterval(() => fetchOrders({ silent: true }), 8000)
+
+    return () => {
+      isMountedRef.current = false
+      if (debounce) clearTimeout(debounce)
+      clearInterval(poll)
+      window.removeEventListener('focus', refreshOnReturn)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  const updateStatus = async (orderId, status) => {
+    const key = orderId + status
+    setUpdating(key)
+    try {
+      const { data, error } = await updateOrderStatus(orderId, status)
+      if (error) throw error
+
+      setOrders(prev => prev.map(o => (o.id === orderId ? { ...o, ...data } : o)))
+      toast.success(
+        status === 'delivered' ? 'Marked as Delivered' :
+        status === 'shipped' ? 'Marked as Shipped' :
+        status === 'processing' ? 'Marked as Processing' :
+        status === 'cancelled' ? 'Order Cancelled' : 'Status updated'
+      )
+    } catch (err) {
+      console.error('update error:', err)
+      toast.error('Failed to update: ' + (err?.message || 'Unknown error'))
+    } finally {
+      setUpdating(null)
+      fetchOrders({ silent: true })
+    }
+  }
+
+  const counts = {
+    all: orders.length,
+    pending: orders.filter(o => o.status === 'pending').length,
+    processing: orders.filter(o => o.status === 'processing').length,
+    shipped: orders.filter(o => o.status === 'shipped').length,
+    delivered: orders.filter(o => o.status === 'delivered').length,
+    cancelled: orders.filter(o => o.status === 'cancelled').length,
+  }
+
+  const filtered = filter === 'all' ? orders : orders.filter(o => o.status === filter)
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="font-display text-2xl text-white">Orders</h1>
-        <p className="font-body text-sm text-forest-500">{orders.length} total orders</p>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-forest-600" />
-          <input
-            type="text"
-            placeholder="Search by order ID, name, email..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full bg-forest-900 border border-forest-700 rounded-xl pl-10 pr-4 py-2.5 font-body text-sm text-white placeholder-forest-600 focus:outline-none focus:border-forest-500"
-          />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-2xl text-white">Orders</h1>
+          <p className="font-body text-sm text-forest-500">{orders.length} total orders</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {['all', ...STATUS_OPTIONS].map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`font-body text-xs px-3 py-2 rounded-full capitalize transition-all border ${
-                statusFilter === s
-                  ? s === 'all' ? 'bg-forest-600 text-white border-forest-600' : STATUS_COLOR[s]
-                  : 'border-forest-700 text-forest-500 hover:border-forest-500'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
+        <button
+          onClick={() => fetchOrders({ withLoader: true })}
+          className="flex items-center gap-2 text-forest-400 hover:text-white border border-forest-700 hover:border-forest-500 px-4 py-2 rounded-xl font-body text-sm transition-colors"
+        >
+          <RefreshCw className="w-4 h-4" /> Refresh
+        </button>
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+        {Object.entries(counts).map(([key, count]) => (
+          <button
+            key={key}
+            onClick={() => setFilter(key)}
+            className={`font-body text-xs px-4 py-2 rounded-full capitalize transition-all border ${
+              filter === key
+                ? 'bg-forest-600 text-white border-forest-600'
+                : 'border-forest-700 text-forest-400 hover:border-forest-500'
+            }`}
+          >
+            {key} ({count})
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="space-y-4">
+          {[1, 2, 3].map(i => <div key={i} className="h-48 bg-forest-800 rounded-2xl animate-pulse" />)}
         </div>
-      </div>
+      ) : filtered.length === 0 ? (
+        <div className="py-20 text-center bg-forest-900 border border-forest-800 rounded-2xl">
+          <Package className="w-12 h-12 text-forest-700 mx-auto mb-3" />
+          <p className="font-body text-forest-500">No orders found</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {filtered.map(order => {
+            const addr = order.shipping_address || {}
+            const isDelivered = order.status === 'delivered'
+            const isCancelled = order.status === 'cancelled'
+            const StatusIcon = STATUS[order.status]?.icon || Clock
 
-      {/* Table */}
-      <div className="bg-forest-900 border border-forest-800 rounded-2xl overflow-hidden">
-        {loading ? (
-          <div className="p-8 space-y-3">
-            {[1,2,3,4,5].map(i => <div key={i} className="h-12 bg-forest-800 rounded-xl animate-pulse" />)}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <Package className="w-10 h-10 text-forest-700 mx-auto mb-3" />
-            <p className="font-body text-forest-500">No orders found</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-forest-800">
-                  {['Order ID', 'Customer', 'Date', 'Items', 'Amount', 'Status', 'Action'].map(h => (
-                    <th key={h} className="text-left px-5 py-3.5 font-body text-xs text-forest-600 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(order => (
-                  <tr key={order.id} className="border-b border-forest-800/50 hover:bg-forest-800/30 transition-colors">
-                    <td className="px-5 py-4 font-body text-xs text-forest-400">
-                      #{order.id?.slice(0, 8).toUpperCase()}
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="font-body text-sm text-white">{order.profiles?.full_name || 'Guest'}</p>
-                      <p className="font-body text-xs text-forest-500">{order.profiles?.email || '—'}</p>
-                    </td>
-                    <td className="px-5 py-4 font-body text-xs text-forest-500 whitespace-nowrap">
-                      {new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </td>
-                    <td className="px-5 py-4 font-body text-xs text-forest-400">
-                      {order.order_items?.length || 0} item{order.order_items?.length !== 1 ? 's' : ''}
-                    </td>
-                    <td className="px-5 py-4 font-display text-sm text-white whitespace-nowrap">
-                      ₹{Number(order.total_amount).toLocaleString('en-IN')}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className={`font-body text-xs px-2.5 py-1 rounded-full capitalize ${STATUS_COLOR[order.status] || ''}`}>
-                        {order.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <button
-                        onClick={() => setSelectedOrder(order)}
-                        className="flex items-center gap-1.5 text-forest-400 hover:text-white transition-colors font-body text-xs border border-forest-700 hover:border-forest-500 px-3 py-1.5 rounded-full"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+            return (
+              <div key={order.id} className={`bg-forest-900 border rounded-2xl overflow-hidden ${isDelivered ? 'border-forest-800/50 opacity-80' : 'border-forest-700'}`}>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-forest-800">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border ${STATUS[order.status]?.color}`}>
+                      <StatusIcon className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="font-display text-white text-sm">Order #{order.id.slice(0, 8).toUpperCase()}</p>
+                      <p className="font-body text-xs text-forest-500">
+                        {new Date(order.created_at).toLocaleDateString('en-IN', {
+                          day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-display text-lg text-white">
+                      Rs {Number(order.total_amount).toLocaleString('en-IN')}
+                    </span>
+                    <span className={`font-body text-xs px-3 py-1 rounded-full capitalize border ${STATUS[order.status]?.color}`}>
+                      {STATUS[order.status]?.label}
+                    </span>
+                  </div>
+                </div>
 
-      {selectedOrder && (
-        <OrderDetailModal
-          order={selectedOrder}
-          onClose={() => setSelectedOrder(null)}
-          onStatusUpdate={handleStatusUpdate}
-        />
+                <div className="p-5 grid md:grid-cols-3 gap-5">
+                  <div>
+                    <p className="font-body text-xs text-forest-500 uppercase tracking-wider mb-3">
+                      Items ({order.order_items?.length || 0})
+                    </p>
+                    <div className="space-y-2">
+                      {(order.order_items || []).length === 0 ? (
+                        <p className="font-body text-xs text-forest-600">No item details</p>
+                      ) : (
+                        order.order_items.map((item, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            {item.product_image ? (
+                              <img src={item.product_image} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg bg-forest-800 flex items-center justify-center shrink-0">
+                                <Package className="w-4 h-4 text-forest-600" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-body text-xs text-white truncate">{item.product_name || 'Plant'}</p>
+                              <p className="font-body text-xs text-forest-500">Qty: {item.quantity} x Rs {item.price}</p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="font-body text-xs text-forest-500 uppercase tracking-wider mb-3">Delivery Address</p>
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2">
+                        <MapPin className="w-4 h-4 text-forest-500 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-body text-sm text-white font-medium">{addr.name || '-'}</p>
+                          <p className="font-body text-xs text-forest-400 leading-relaxed">
+                            {addr.address && <span>{addr.address}<br /></span>}
+                            {addr.city && addr.state && <span>{addr.city}, {addr.state}<br /></span>}
+                            {addr.pincode && <span>PIN: {addr.pincode}</span>}
+                          </p>
+                        </div>
+                      </div>
+                      {addr.phone && (
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-4 h-4 text-forest-500 shrink-0" />
+                          <p className="font-body text-xs text-forest-400">{addr.phone}</p>
+                        </div>
+                      )}
+                      {addr.email && (
+                        <div className="flex items-center gap-2">
+                          <Mail className="w-4 h-4 text-forest-500 shrink-0" />
+                          <p className="font-body text-xs text-forest-400">{addr.email}</p>
+                        </div>
+                      )}
+                      {order.payment_method && (
+                        <div className="mt-2 inline-flex items-center gap-1.5 bg-forest-800 px-3 py-1.5 rounded-full">
+                          <span className="font-body text-xs text-forest-400 capitalize">
+                            {order.payment_method === 'cod' ? 'Cash on Delivery' : order.payment_method === 'upi' ? 'UPI' : 'Card'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="font-body text-xs text-forest-500 uppercase tracking-wider mb-3">Update Status</p>
+                    {isDelivered ? (
+                      <div className="flex items-center gap-2 bg-forest-800/50 rounded-xl p-3">
+                        <CheckCircle className="w-5 h-5 text-forest-400" />
+                        <div>
+                          <p className="font-body text-sm text-forest-400">Delivered</p>
+                          <p className="font-body text-xs text-forest-600">Order completed</p>
+                        </div>
+                      </div>
+                    ) : isCancelled ? (
+                      <div className="flex items-center gap-2 bg-red-900/20 rounded-xl p-3">
+                        <XCircle className="w-5 h-5 text-red-400" />
+                        <p className="font-body text-sm text-red-400">Cancelled</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {order.status === 'pending' && (
+                          <button
+                            onClick={() => updateStatus(order.id, 'processing')}
+                            disabled={updating === order.id + 'processing'}
+                            className="w-full flex items-center gap-2 bg-blue-500/20 border border-blue-500/30 text-blue-400 font-body text-sm px-4 py-2.5 rounded-xl hover:bg-blue-500/30 transition-colors disabled:opacity-50"
+                          >
+                            <RefreshCw className="w-4 h-4 shrink-0" />
+                            {updating === order.id + 'processing' ? 'Updating...' : 'Mark as Processing'}
+                          </button>
+                        )}
+
+                        {(order.status === 'pending' || order.status === 'processing') && (
+                          <button
+                            onClick={() => updateStatus(order.id, 'shipped')}
+                            disabled={updating === order.id + 'shipped'}
+                            className="w-full flex items-center gap-2 bg-purple-500/20 border border-purple-500/30 text-purple-400 font-body text-sm px-4 py-2.5 rounded-xl hover:bg-purple-500/30 transition-colors disabled:opacity-50"
+                          >
+                            <Truck className="w-4 h-4 shrink-0" />
+                            {updating === order.id + 'shipped' ? 'Updating...' : 'Mark as Shipped'}
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => updateStatus(order.id, 'delivered')}
+                          disabled={updating === order.id + 'delivered'}
+                          className="w-full flex items-center gap-2 bg-forest-600 border border-forest-500 text-white font-body text-sm px-4 py-2.5 rounded-xl hover:bg-forest-500 transition-colors disabled:opacity-50"
+                        >
+                          <CheckCircle className="w-4 h-4 shrink-0" />
+                          {updating === order.id + 'delivered' ? 'Updating...' : 'Mark as Delivered'}
+                        </button>
+
+                        <button
+                          onClick={() => updateStatus(order.id, 'cancelled')}
+                          disabled={updating === order.id + 'cancelled'}
+                          className="w-full flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 font-body text-sm px-4 py-2.5 rounded-xl hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                        >
+                          <XCircle className="w-4 h-4 shrink-0" />
+                          {updating === order.id + 'cancelled' ? 'Updating...' : 'Cancel Order'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )

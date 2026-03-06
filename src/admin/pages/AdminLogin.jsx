@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Leaf, Eye, EyeOff, Shield } from 'lucide-react'
-import { adminSignIn } from '../adminSupabase'
+import { adminSignIn, adminSignOut } from '../adminSupabase'
 import { checkIsAdmin } from '../adminSupabase'
 import { useAdminAuth } from '../AdminAuthContext'
 import toast from 'react-hot-toast'
@@ -25,6 +25,7 @@ export default function AdminLogin() {
     }
     const isAdmin = await checkIsAdmin()
     if (!isAdmin) {
+      await adminSignOut()
       toast.error('Access denied. You are not an admin.')
       setLoading(false)
       return
