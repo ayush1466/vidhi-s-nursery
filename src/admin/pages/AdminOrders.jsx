@@ -12,45 +12,69 @@ const STATUS = {
   delivered: { label: 'Delivered', icon: CheckCircle, color: 'bg-forest-500/20 text-forest-400 border-forest-500/30' },
   cancelled: { label: 'Cancelled', icon: XCircle, color: 'bg-red-500/20 text-red-400 border-red-500/30' },
 }
-const ADMIN_ORDERS_TIMEOUT_MS = 45000
+const ADMIN_ORDERS_TIMEOUT_MS = 20000
+const ADMIN_ORDERS_LIMIT = 100
 
 export default function AdminOrders() {
-  const cachedOrders = getAdminCache('orders_list')
+  const cachedOrders = getAdminCache('orders_list', 15 * 60 * 1000)
   const [orders, setOrders] = useState(cachedOrders || [])
   const [loading, setLoading] = useState(!cachedOrders)
   const [filter, setFilter] = useState('all')
   const [updating, setUpdating] = useState(null)
   const isMountedRef = useRef(true)
   const activeFetchIdRef = useRef(0)
+  const lastSilentFetchRef = useRef(0)
 
-  const fetchOrders = async ({ withLoader = false, silent = false } = {}) => {
+  const runQueryWithTimeout = async (queryFactory, ms, message) => {
+    const controller = new AbortController()
+    let timeoutId
+    const timeoutError = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort()
+        reject(new Error(message))
+      }, ms)
+    })
+    try {
+      return await Promise.race([queryFactory(controller.signal), timeoutError])
+    } catch (err) {
+      const isAbortError =
+        err?.name === 'AbortError' ||
+        String(err?.message || '').toLowerCase().includes('abort')
+      if (isAbortError) throw new Error(message)
+      throw err
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  const fetchOrders = async ({ withLoader = false, silent = false, notify = false } = {}) => {
+    if (silent) {
+      const now = Date.now()
+      if (now - lastSilentFetchRef.current < 1500) return
+      lastSilentFetchRef.current = now
+    }
     const fetchId = ++activeFetchIdRef.current
     if (withLoader && isMountedRef.current) setLoading(true)
 
     try {
-      const withTimeout = (promise, ms, message) =>
-        Promise.race([
-          promise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
-        ])
-
-      const query = () =>
+      const query = (signal) =>
         supabase
           .from('orders')
           .select(`
-            id, status, total_amount, created_at, shipping_address, payment_method, user_id,
-            order_items ( id, quantity, price, product_name, product_image )
+            id, status, total_amount, created_at, shipping_address, payment_method, user_id
           `)
           .order('created_at', { ascending: false })
+          .limit(ADMIN_ORDERS_LIMIT)
+          .abortSignal(signal)
 
       const isTimeoutError = (err) => String(err?.message || '').toLowerCase().includes('timed out')
 
       let response
       try {
-        response = await withTimeout(query(), ADMIN_ORDERS_TIMEOUT_MS, 'Admin orders request timed out')
+        response = await runQueryWithTimeout(query, ADMIN_ORDERS_TIMEOUT_MS, 'Admin orders request timed out')
       } catch (firstErr) {
         if (!isTimeoutError(firstErr)) throw firstErr
-        response = await withTimeout(query(), ADMIN_ORDERS_TIMEOUT_MS, 'Admin orders request timed out')
+        response = await runQueryWithTimeout(query, ADMIN_ORDERS_TIMEOUT_MS, 'Admin orders request timed out')
       }
 
       const { data, error } = response
@@ -60,8 +84,11 @@ export default function AdminOrders() {
       setOrders(data || [])
       setAdminCache('orders_list', data || [])
     } catch (err) {
-      console.error('fetch orders error:', err)
-      if (!silent) toast.error('Failed to load orders')
+      const isTimeoutError = String(err?.message || '').toLowerCase().includes('timed out')
+      if (!(silent && isTimeoutError)) {
+        console.error('fetch orders error:', err)
+      }
+      if (notify) toast.error('Failed to load orders')
     } finally {
       if (isMountedRef.current) setLoading(false)
     }
@@ -69,7 +96,7 @@ export default function AdminOrders() {
 
   useEffect(() => {
     isMountedRef.current = true
-    fetchOrders({ withLoader: true })
+    fetchOrders({ withLoader: true, silent: true })
 
     const refreshOnReturn = () => fetchOrders({ silent: true })
     const handleVisibility = () => {
@@ -79,19 +106,42 @@ export default function AdminOrders() {
     window.addEventListener('focus', refreshOnReturn)
     document.addEventListener('visibilitychange', handleVisibility)
 
-    let debounce = null
     const channel = supabase
       .channel('admin_orders_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        if (debounce) clearTimeout(debounce)
-        debounce = setTimeout(() => fetchOrders({ silent: true }), 800)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setOrders(prev => {
+            const next = [payload.new, ...prev.filter(o => o.id !== payload.new.id)]
+            setAdminCache('orders_list', next)
+            return next
+          })
+          return
+        }
+        if (payload.eventType === 'UPDATE') {
+          setOrders(prev => {
+            const next = prev.map(o => (o.id === payload.new.id ? { ...o, ...payload.new } : o))
+            setAdminCache('orders_list', next)
+            return next
+          })
+          return
+        }
+        if (payload.eventType === 'DELETE') {
+          setOrders(prev => {
+            const next = prev.filter(o => o.id !== payload.old.id)
+            setAdminCache('orders_list', next)
+            return next
+          })
+        }
       })
       .subscribe()
-    const poll = setInterval(() => fetchOrders({ silent: true }), 8000)
+    const poll = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchOrders({ silent: true })
+      }
+    }, 8000)
 
     return () => {
       isMountedRef.current = false
-      if (debounce) clearTimeout(debounce)
       clearInterval(poll)
       window.removeEventListener('focus', refreshOnReturn)
       document.removeEventListener('visibilitychange', handleVisibility)
@@ -106,7 +156,11 @@ export default function AdminOrders() {
       const { data, error } = await updateOrderStatus(orderId, status)
       if (error) throw error
 
-      setOrders(prev => prev.map(o => (o.id === orderId ? { ...o, ...data } : o)))
+      setOrders(prev => {
+        const next = prev.map(o => (o.id === orderId ? { ...o, ...data } : o))
+        setAdminCache('orders_list', next)
+        return next
+      })
       toast.success(
         status === 'delivered' ? 'Marked as Delivered' :
         status === 'shipped' ? 'Marked as Shipped' :
@@ -141,7 +195,7 @@ export default function AdminOrders() {
           <p className="font-body text-sm text-forest-500">{orders.length} total orders</p>
         </div>
         <button
-          onClick={() => fetchOrders({ withLoader: true })}
+          onClick={() => fetchOrders({ withLoader: true, notify: true })}
           className="flex items-center gap-2 text-forest-400 hover:text-white border border-forest-700 hover:border-forest-500 px-4 py-2 rounded-xl font-body text-sm transition-colors"
         >
           <RefreshCw className="w-4 h-4" /> Refresh
@@ -164,7 +218,7 @@ export default function AdminOrders() {
         ))}
       </div>
 
-      {loading ? (
+      {loading && orders.length === 0 ? (
         <div className="space-y-4">
           {[1, 2, 3].map(i => <div key={i} className="h-48 bg-forest-800 rounded-2xl animate-pulse" />)}
         </div>

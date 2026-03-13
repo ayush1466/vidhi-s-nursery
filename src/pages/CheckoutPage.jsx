@@ -7,7 +7,6 @@ import { CheckCircle, CreditCard, Truck, Lock, MapPin } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const STEPS = ['Shipping', 'Payment', 'Confirm']
-const isUUID = (val) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(val))
 const ORDER_TIMEOUT_MS = 45000
 
 export default function CheckoutPage() {
@@ -101,14 +100,15 @@ export default function CheckoutPage() {
       }
 
       const { data: order, error: orderError } = orderResponse
-
       if (orderError) throw orderError
 
+      // FIX: always save product_name and product_image directly on the order item
+      // Don't rely on product_id join — saves item details even for mock/integer IDs
       const orderItems = items.map(item => ({
         order_id: order.id,
-        product_id: isUUID(item.id) ? item.id : null,
-        product_name: item.name,
-        product_image: item.image,
+        product_id: null,          // set to null — avoids FK constraint issues with integer mock IDs
+        product_name: item.name,   // always saved directly
+        product_image: item.image, // always saved directly
         quantity: item.quantity,
         price: item.price,
       }))
@@ -301,6 +301,7 @@ export default function CheckoutPage() {
             )}
           </div>
 
+          {/* Order Summary sidebar */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-3xl p-5 shadow-sm sticky top-24">
               <h3 className="font-display text-bark text-lg mb-4">Order Summary</h3>

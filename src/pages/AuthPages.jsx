@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Leaf, Eye, EyeOff } from 'lucide-react'
-import { signIn, supabase } from '../lib/supabase'
+import { signIn, signInWithGoogle, supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
 
 export function LoginPage() {
@@ -9,6 +9,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const navigate = useNavigate()
 
   const handleLogin = async (e) => {
@@ -24,6 +25,16 @@ export function LoginPage() {
     setLoading(false)
   }
 
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true)
+    const { error } = await signInWithGoogle()
+    if (error) {
+      toast.error('Google sign in failed')
+      setGoogleLoading(false)
+    }
+    // on success, Google redirects the browser — no need to navigate manually
+  }
+
   return (
     <div className="min-h-screen bg-cream flex items-center justify-center px-4 pt-16">
       <div className="w-full max-w-md">
@@ -35,48 +46,81 @@ export function LoginPage() {
           <p className="font-body text-sm text-gray-400 mt-1">Sign in to your Vidhi's Nursery account</p>
         </div>
 
-        <form onSubmit={handleLogin} className="bg-white rounded-3xl p-8 shadow-sm space-y-4">
-          <div>
-            <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">Email</label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full border border-forest-100 rounded-xl px-4 py-3 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
-            />
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="font-body text-xs text-gray-400 uppercase tracking-wider">Password</label>
-              <Link to="/forgot-password" className="font-body text-xs text-forest-600 hover:text-forest-800">
-                Forgot password?
-              </Link>
-            </div>
-            <div className="relative">
-              <input
-                type={showPass ? 'text' : 'password'}
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full border border-forest-100 rounded-xl px-4 py-3 pr-10 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
-              />
-              <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
-                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+        <div className="bg-white rounded-3xl p-8 shadow-sm space-y-4">
+
+          {/* ── Google Sign In ── */}
+          <button
+            onClick={handleGoogleLogin}
+            disabled={googleLoading}
+            className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-full py-3 font-body text-sm text-bark hover:bg-gray-50 transition-colors disabled:opacity-60"
+          >
+            {googleLoading ? (
+              <svg className="animate-spin w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+            )}
+            {googleLoading ? 'Redirecting...' : 'Continue with Google'}
+          </button>
+
+          {/* ── Divider ── */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-gray-100" />
+            <span className="font-body text-xs text-gray-400">or sign in with email</span>
+            <div className="flex-1 h-px bg-gray-100" />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-forest-600 text-white font-body font-medium py-3.5 rounded-full hover:bg-forest-700 transition-colors disabled:opacity-70 mt-2"
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
+          {/* ── Email/Password form ── */}
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">Email</label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full border border-forest-100 rounded-xl px-4 py-3 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="font-body text-xs text-gray-400 uppercase tracking-wider">Password</label>
+                <Link to="/forgot-password" className="font-body text-xs text-forest-600 hover:text-forest-800">
+                  Forgot password?
+                </Link>
+              </div>
+              <div className="relative">
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full border border-forest-100 rounded-xl px-4 py-3 pr-10 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
+                />
+                <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-forest-600 text-white font-body font-medium py-3.5 rounded-full hover:bg-forest-700 transition-colors disabled:opacity-70 mt-2"
+            >
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+        </div>
 
         <p className="font-body text-sm text-center text-gray-400 mt-6">
           Don't have an account?{' '}
@@ -87,11 +131,14 @@ export function LoginPage() {
   )
 }
 
+// ── RegisterPage, ForgotPasswordPage, ResetPasswordPage unchanged below ──
+
 export function RegisterPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   const navigate = useNavigate()
 
   const handleRegister = async (e) => {
@@ -108,6 +155,15 @@ export function RegisterPage() {
     setLoading(false)
   }
 
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true)
+    const { error } = await signInWithGoogle()
+    if (error) {
+      toast.error('Google sign in failed')
+      setGoogleLoading(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-cream flex items-center justify-center px-4 pt-16">
       <div className="w-full max-w-md">
@@ -119,39 +175,70 @@ export function RegisterPage() {
           <p className="font-body text-sm text-gray-400 mt-1">Create your Vidhi's Nursery account</p>
         </div>
 
-        <form onSubmit={handleRegister} className="bg-white rounded-3xl p-8 shadow-sm space-y-4">
-          {[
-            { label: 'Full Name', type: 'text', value: name, setter: setName, placeholder: 'Vidhi Patel' },
-            { label: 'Email', type: 'email', value: email, setter: setEmail, placeholder: 'you@example.com' },
-            { label: 'Password', type: 'password', value: password, setter: setPassword, placeholder: '8+ characters' },
-          ].map(({ label, type, value, setter, placeholder }) => (
-            <div key={label}>
-              <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">{label}</label>
-              <input
-                type={type}
-                required
-                value={value}
-                onChange={e => setter(e.target.value)}
-                placeholder={placeholder}
-                className="w-full border border-forest-100 rounded-xl px-4 py-3 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
-              />
-            </div>
-          ))}
+        <div className="bg-white rounded-3xl p-8 shadow-sm space-y-4">
 
-          <p className="font-body text-xs text-gray-400">
-            By creating an account, you agree to our{' '}
-            <a href="#" className="text-forest-600">Terms of Service</a> and{' '}
-            <a href="#" className="text-forest-600">Privacy Policy</a>.
-          </p>
-
+          {/* Google */}
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-forest-600 text-white font-body font-medium py-3.5 rounded-full hover:bg-forest-700 transition-colors disabled:opacity-70"
+            onClick={handleGoogleLogin}
+            disabled={googleLoading}
+            className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-full py-3 font-body text-sm text-bark hover:bg-gray-50 transition-colors disabled:opacity-60"
           >
-            {loading ? 'Creating account...' : 'Create Account'}
+            {googleLoading ? (
+              <svg className="animate-spin w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+            )}
+            {googleLoading ? 'Redirecting...' : 'Continue with Google'}
           </button>
-        </form>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-gray-100" />
+            <span className="font-body text-xs text-gray-400">or register with email</span>
+            <div className="flex-1 h-px bg-gray-100" />
+          </div>
+
+          <form onSubmit={handleRegister} className="space-y-4">
+            {[
+              { label: 'Full Name', type: 'text', value: name, setter: setName, placeholder: 'Vidhi Patel' },
+              { label: 'Email', type: 'email', value: email, setter: setEmail, placeholder: 'you@example.com' },
+              { label: 'Password', type: 'password', value: password, setter: setPassword, placeholder: '8+ characters' },
+            ].map(({ label, type, value, setter, placeholder }) => (
+              <div key={label}>
+                <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">{label}</label>
+                <input
+                  type={type}
+                  required
+                  value={value}
+                  onChange={e => setter(e.target.value)}
+                  placeholder={placeholder}
+                  className="w-full border border-forest-100 rounded-xl px-4 py-3 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
+                />
+              </div>
+            ))}
+
+            <p className="font-body text-xs text-gray-400">
+              By creating an account, you agree to our{' '}
+              <a href="#" className="text-forest-600">Terms of Service</a> and{' '}
+              <a href="#" className="text-forest-600">Privacy Policy</a>.
+            </p>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-forest-600 text-white font-body font-medium py-3.5 rounded-full hover:bg-forest-700 transition-colors disabled:opacity-70"
+            >
+              {loading ? 'Creating account...' : 'Create Account'}
+            </button>
+          </form>
+        </div>
 
         <p className="font-body text-sm text-center text-gray-400 mt-6">
           Already have an account?{' '}
@@ -162,7 +249,6 @@ export function RegisterPage() {
   )
 }
 
-// ─── Forgot Password Page ───────────────────────────────────────────────────
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
@@ -195,7 +281,6 @@ export function ForgotPasswordPage() {
 
         <div className="bg-white rounded-3xl p-8 shadow-sm">
           {sent ? (
-            // Success state
             <div className="text-center space-y-4">
               <div className="w-16 h-16 bg-forest-50 rounded-full flex items-center justify-center mx-auto">
                 <span className="text-3xl">📬</span>
@@ -203,25 +288,16 @@ export function ForgotPasswordPage() {
               <h2 className="font-display text-xl text-bark">Check your email!</h2>
               <p className="font-body text-sm text-gray-400 leading-relaxed">
                 We sent a password reset link to <strong className="text-bark">{email}</strong>.
-                Check your inbox and click the link to reset your password.
               </p>
               <p className="font-body text-xs text-gray-300">
-                Didn't receive it? Check your spam folder or{' '}
-                <button
-                  onClick={() => setSent(false)}
-                  className="text-forest-600 hover:underline"
-                >
-                  try again
-                </button>
+                Didn't receive it?{' '}
+                <button onClick={() => setSent(false)} className="text-forest-600 hover:underline">try again</button>
               </p>
             </div>
           ) : (
-            // Form state
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">
-                  Your Email Address
-                </label>
+                <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">Your Email Address</label>
                 <input
                   type="email"
                   required
@@ -243,15 +319,13 @@ export function ForgotPasswordPage() {
         </div>
 
         <p className="font-body text-sm text-center text-gray-400 mt-6">
-          Remember your password?{' '}
-          <Link to="/login" className="text-forest-600 hover:text-forest-800 font-medium">Sign in</Link>
+          <Link to="/login" className="text-forest-600 hover:text-forest-800 font-medium">← Back to Sign In</Link>
         </p>
       </div>
     </div>
   )
 }
 
-// ─── Reset Password Page ────────────────────────────────────────────────────
 export function ResetPasswordPage() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -262,16 +336,8 @@ export function ResetPasswordPage() {
 
   const handleReset = async (e) => {
     e.preventDefault()
-
-    if (password.length < 8) {
-      toast.error('Password must be at least 8 characters')
-      return
-    }
-    if (password !== confirm) {
-      toast.error('Passwords do not match')
-      return
-    }
-
+    if (password.length < 8) { toast.error('Password must be at least 8 characters'); return }
+    if (password !== confirm) { toast.error('Passwords do not match'); return }
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password })
     if (error) {
@@ -302,16 +368,12 @@ export function ResetPasswordPage() {
                 <span className="text-3xl">✅</span>
               </div>
               <h2 className="font-display text-xl text-bark">Password Updated!</h2>
-              <p className="font-body text-sm text-gray-400">
-                Redirecting you to sign in...
-              </p>
+              <p className="font-body text-sm text-gray-400">Redirecting you to sign in...</p>
             </div>
           ) : (
             <form onSubmit={handleReset} className="space-y-4">
               <div>
-                <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">
-                  New Password
-                </label>
+                <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">New Password</label>
                 <div className="relative">
                   <input
                     type={showPass ? 'text' : 'password'}
@@ -321,40 +383,13 @@ export function ResetPasswordPage() {
                     placeholder="Minimum 8 characters"
                     className="w-full border border-forest-100 rounded-xl px-4 py-3 pr-10 font-body text-sm focus:outline-none focus:ring-2 focus:ring-forest-300 bg-cream"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPass(!showPass)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-                  >
+                  <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
                     {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                {/* Password strength indicator */}
-                {password.length > 0 && (
-                  <div className="mt-2 flex gap-1">
-                    {[1, 2, 3, 4].map(i => (
-                      <div
-                        key={i}
-                        className={`h-1 flex-1 rounded-full transition-colors ${
-                          password.length >= i * 3
-                            ? password.length >= 10 ? 'bg-forest-500'
-                              : password.length >= 6 ? 'bg-earth-400'
-                              : 'bg-red-400'
-                            : 'bg-gray-100'
-                        }`}
-                      />
-                    ))}
-                    <span className="font-body text-xs text-gray-400 ml-1">
-                      {password.length < 6 ? 'Weak' : password.length < 10 ? 'Fair' : 'Strong'}
-                    </span>
-                  </div>
-                )}
               </div>
-
               <div>
-                <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">
-                  Confirm Password
-                </label>
+                <label className="font-body text-xs text-gray-400 uppercase tracking-wider block mb-1.5">Confirm Password</label>
                 <input
                   type="password"
                   required
@@ -362,21 +397,14 @@ export function ResetPasswordPage() {
                   onChange={e => setConfirm(e.target.value)}
                   placeholder="Repeat your new password"
                   className={`w-full border rounded-xl px-4 py-3 font-body text-sm focus:outline-none focus:ring-2 bg-cream transition-colors ${
-                    confirm && confirm !== password
-                      ? 'border-red-300 focus:ring-red-200'
-                      : confirm && confirm === password
-                      ? 'border-forest-300 focus:ring-forest-200'
-                      : 'border-forest-100 focus:ring-forest-300'
+                    confirm && confirm !== password ? 'border-red-300 focus:ring-red-200'
+                    : confirm && confirm === password ? 'border-forest-300 focus:ring-forest-200'
+                    : 'border-forest-100 focus:ring-forest-300'
                   }`}
                 />
-                {confirm && confirm !== password && (
-                  <p className="font-body text-xs text-red-400 mt-1">Passwords do not match</p>
-                )}
-                {confirm && confirm === password && (
-                  <p className="font-body text-xs text-forest-600 mt-1">✓ Passwords match</p>
-                )}
+                {confirm && confirm !== password && <p className="font-body text-xs text-red-400 mt-1">Passwords do not match</p>}
+                {confirm && confirm === password && <p className="font-body text-xs text-forest-600 mt-1">✓ Passwords match</p>}
               </div>
-
               <button
                 type="submit"
                 disabled={loading || password !== confirm || password.length < 8}

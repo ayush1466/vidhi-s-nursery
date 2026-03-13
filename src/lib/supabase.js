@@ -8,7 +8,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: true,
     flowType: 'pkce',
-    lock: (name, acquireTimeout, fn) => fn(),  // bypass navigator lock completely
+    lock: (name, acquireTimeout, fn) => fn(),
   }
 })
 
@@ -31,6 +31,16 @@ export const signIn = (email, password) =>
 export const signOut = () => supabase.auth.signOut()
 
 export const getUser = () => supabase.auth.getUser()
+
+// ── NEW: Google OAuth ──────────────────────────────────
+export const signInWithGoogle = () =>
+  supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+    },
+  })
+// ───────────────────────────────────────────────────────
 
 export const getProducts = async (category = null, search = null) => {
   let query = supabase.from('products').select('*').eq('in_stock', true)

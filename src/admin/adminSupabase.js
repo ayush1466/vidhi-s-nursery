@@ -34,6 +34,28 @@ export const checkIsAdmin = async () => {
   }
 }
 
+// ── Image Upload ───────────────────────────────────────
+export const uploadProductImage = async (file) => {
+  try {
+    const ext = file.name.split('.').pop()
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('product-images')
+      .upload(fileName, file, { cacheControl: '3600', upsert: false })
+
+    if (uploadError) return { url: null, error: uploadError }
+
+    const { data } = supabase.storage
+      .from('product-images')
+      .getPublicUrl(fileName)
+
+    return { url: data.publicUrl, error: null }
+  } catch (err) {
+    return { url: null, error: err }
+  }
+}
+
 // ── Dashboard Stats ───────────────────────────────────
 export const getDashboardStats = async () => {
   try {
@@ -151,12 +173,8 @@ export const toggleProductStock = (id, inStock) =>
 export const getAllCustomers = async () => {
   try {
     const [profilesRes, ordersRes] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, full_name, email, created_at'),
-      supabase
-        .from('orders')
-        .select('id, user_id, total_amount, status'),
+      supabase.from('profiles').select('id, full_name, email, created_at'),
+      supabase.from('orders').select('id, user_id, total_amount, status'),
     ])
 
     if (profilesRes.error) return { data: null, error: profilesRes.error }
